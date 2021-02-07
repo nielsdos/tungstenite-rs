@@ -289,7 +289,9 @@ impl Frame {
             0 => Ok(None),
             1 => Err(Error::Protocol(ProtocolError::InvalidCloseSequence)),
             _ => {
-                let data = match self.payload {
+                let data = self.payload;
+                let code = NetworkEndian::read_u16(&data.as_ref()[0..2]).into();
+                let data = match data {
                     Payload::Owned(mut v) => {
                         v.drain(..2);
                         v
@@ -298,7 +300,6 @@ impl Frame {
                         b.as_ref()[2..].to_owned()
                     }
                 };
-                let code = NetworkEndian::read_u16(&data[0..2]).into();
                 let text = String::from_utf8(data)?;
                 Ok(Some(CloseFrame { code, reason: text.into() }))
             }
