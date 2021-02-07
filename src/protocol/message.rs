@@ -79,6 +79,7 @@ mod string_collect {
 }
 
 use self::string_collect::StringCollector;
+use crate::protocol::payload::Payload;
 
 /// A struct representing the incomplete message.
 #[derive(Debug)]
@@ -140,7 +141,7 @@ impl IncompleteMessage {
     /// Convert an incomplete message into a complete one.
     pub fn complete(self) -> Result<Message> {
         match self.collector {
-            IncompleteMessageCollector::Binary(v) => Ok(Message::Binary(v)),
+            IncompleteMessageCollector::Binary(v) => Ok(Message::Binary(v.into())),
             IncompleteMessageCollector::Text(t) => {
                 let text = t.into_string()?;
                 Ok(Message::Text(text))
@@ -161,7 +162,7 @@ pub enum Message {
     /// A text WebSocket message
     Text(String),
     /// A binary WebSocket message
-    Binary(Vec<u8>),
+    Binary(Payload),
     /// A ping message with the specified payload
     ///
     /// The payload here must have a length less than 125 bytes
@@ -186,7 +187,7 @@ impl Message {
     /// Create a new binary WebSocket message by converting to Vec<u8>.
     pub fn binary<B>(bin: B) -> Message
     where
-        B: Into<Vec<u8>>,
+        B: Into<Payload>,
     {
         Message::Binary(bin.into())
     }
@@ -220,7 +221,8 @@ impl Message {
     pub fn len(&self) -> usize {
         match *self {
             Message::Text(ref string) => string.len(),
-            Message::Binary(ref data) | Message::Ping(ref data) | Message::Pong(ref data) => {
+            Message::Binary(ref data) => data.len(),
+            Message::Ping(ref data) | Message::Pong(ref data) => {
                 data.len()
             }
             Message::Close(ref data) => data.as_ref().map(|d| d.reason.len()).unwrap_or(0),
@@ -237,7 +239,8 @@ impl Message {
     pub fn into_data(self) -> Vec<u8> {
         match self {
             Message::Text(string) => string.into_bytes(),
-            Message::Binary(data) | Message::Ping(data) | Message::Pong(data) => data,
+            Message::Binary(data) => data.to_vec(),
+            Message::Ping(data) | Message::Pong(data) => data,
             Message::Close(None) => Vec::new(),
             Message::Close(Some(frame)) => frame.reason.into_owned().into_bytes(),
         }
@@ -247,7 +250,10 @@ impl Message {
     pub fn into_text(self) -> Result<String> {
         match self {
             Message::Text(string) => Ok(string),
-            Message::Binary(data) | Message::Ping(data) | Message::Pong(data) => {
+            Message::Binary(data) => {
+                Ok(String::from_utf8(data.to_vec()).map_err(|err| err.utf8_error())?)
+            }
+            Message::Ping(data) | Message::Pong(data) => {
                 Ok(String::from_utf8(data).map_err(|err| err.utf8_error())?)
             }
             Message::Close(None) => Ok(String::new()),
@@ -260,7 +266,8 @@ impl Message {
     pub fn to_text(&self) -> Result<&str> {
         match *self {
             Message::Text(ref string) => Ok(string),
-            Message::Binary(ref data) | Message::Ping(ref data) | Message::Pong(ref data) => {
+            Message::Binary(ref data) => Ok(str::from_utf8(data.as_ref())?),
+            Message::Ping(ref data) | Message::Pong(ref data) => {
                 Ok(str::from_utf8(data)?)
             }
             Message::Close(None) => Ok(""),

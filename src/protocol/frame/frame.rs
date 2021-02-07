@@ -14,6 +14,8 @@ use super::{
     mask::{apply_mask, generate_mask},
 };
 use crate::error::{Error, ProtocolError, Result};
+use bytes::BytesMut;
+use crate::protocol::payload::Payload;
 
 /// A struct representing the close command.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -201,7 +203,7 @@ impl FrameHeader {
 #[derive(Debug, Clone)]
 pub struct Frame {
     header: FrameHeader,
-    payload: Vec<u8>,
+    payload: Payload,
 }
 
 impl Frame {
@@ -233,14 +235,8 @@ impl Frame {
 
     /// Get a reference to the frame's payload.
     #[inline]
-    pub fn payload(&self) -> &Vec<u8> {
-        &self.payload
-    }
-
-    /// Get a mutable reference to the frame's payload.
-    #[inline]
-    pub fn payload_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.payload
+    pub fn payload(&self) -> &[u8] {
+        self.payload.as_ref()
     }
 
     /// Test whether the frame is masked.
@@ -263,20 +259,27 @@ impl Frame {
     #[inline]
     pub(crate) fn apply_mask(&mut self) {
         if let Some(mask) = self.header.mask.take() {
-            apply_mask(&mut self.payload, mask)
+            match &mut self.payload {
+                Payload::Owned(v) => apply_mask(v, mask),
+                Payload::Shared(b) => {
+                    let mut s = BytesMut::from(b.as_ref());
+                    apply_mask(&mut s, mask);
+                    *b = s.freeze();
+                }
+            }
         }
     }
 
     /// Consume the frame into its payload as binary.
     #[inline]
-    pub fn into_data(self) -> Vec<u8> {
+    pub fn into_data(self) -> Payload {
         self.payload
     }
 
     /// Consume the frame into its payload as string.
     #[inline]
     pub fn into_string(self) -> StdResult<String, FromUtf8Error> {
-        String::from_utf8(self.payload)
+        String::from_utf8(self.payload.into_vec())
     }
 
     /// Consume the frame into a closing frame.
@@ -286,9 +289,16 @@ impl Frame {
             0 => Ok(None),
             1 => Err(Error::Protocol(ProtocolError::InvalidCloseSequence)),
             _ => {
-                let mut data = self.payload;
+                let data = match self.payload {
+                    Payload::Owned(mut v) => {
+                        v.drain(..2);
+                        v
+                    }
+                    Payload::Shared(b) => {
+                        b.as_ref()[2..].to_owned()
+                    }
+                };
                 let code = NetworkEndian::read_u16(&data[0..2]).into();
-                data.drain(0..2);
                 let text = String::from_utf8(data)?;
                 Ok(Some(CloseFrame { code, reason: text.into() }))
             }
@@ -297,7 +307,7 @@ impl Frame {
 
     /// Create a new data frame.
     #[inline]
-    pub fn message(data: Vec<u8>, opcode: OpCode, is_final: bool) -> Frame {
+    pub fn message(data: Payload, opcode: OpCode, is_final: bool) -> Frame {
         debug_assert!(matches!(opcode, OpCode::Data(_)), "Invalid opcode for data frame.");
 
         Frame { header: FrameHeader { is_final, opcode, ..FrameHeader::default() }, payload: data }
@@ -311,7 +321,7 @@ impl Frame {
                 opcode: OpCode::Control(Control::Pong),
                 ..FrameHeader::default()
             },
-            payload: data,
+            payload: data.into(),
         }
     }
 
@@ -323,7 +333,7 @@ impl Frame {
                 opcode: OpCode::Control(Control::Ping),
                 ..FrameHeader::default()
             },
-            payload: data,
+            payload: data.into(),
         }
     }
 
@@ -339,11 +349,11 @@ impl Frame {
             Vec::new()
         };
 
-        Frame { header: FrameHeader::default(), payload }
+        Frame { header: FrameHeader::default(), payload: payload.into() }
     }
 
     /// Create a frame from given header and data.
-    pub fn from_payload(header: FrameHeader, payload: Vec<u8>) -> Self {
+    pub fn from_payload(header: FrameHeader, payload: Payload) -> Self {
         Frame { header, payload }
     }
 
@@ -377,7 +387,7 @@ payload: 0x{}
             // self.mask.map(|mask| format!("{:?}", mask)).unwrap_or("NONE".into()),
             self.len(),
             self.payload.len(),
-            self.payload.iter().map(|byte| format!("{:x}", byte)).collect::<String>()
+            self.payload.as_ref().iter().map(|byte| format!("{:x}", byte)).collect::<String>()
         )
     }
 }
@@ -412,7 +422,7 @@ impl LengthFormat {
         }
     }
 
-    /// Encode the givem length.
+    /// Encode the given length.
     #[inline]
     fn length_byte(&self) -> u8 {
         match *self {
@@ -448,8 +458,8 @@ mod tests {
         assert_eq!(length, 7);
         let mut payload = Vec::new();
         raw.read_to_end(&mut payload).unwrap();
-        let frame = Frame::from_payload(header, payload);
-        assert_eq!(frame.into_data(), vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+        let frame = Frame::from_payload(header, payload.into());
+        assert_eq!(frame.into_data().into_vec(), vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
     }
 
     #[test]

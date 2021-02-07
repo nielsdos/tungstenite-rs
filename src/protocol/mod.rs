@@ -1,6 +1,7 @@
 //! Generic WebSocket message stream.
 
 pub mod frame;
+pub mod payload;
 
 mod message;
 
@@ -486,11 +487,11 @@ impl WebSocketContext {
                             let data = frame.into_data();
                             // No ping processing after we sent a close frame.
                             if self.state.is_active() {
-                                self.pong = Some(Frame::pong(data.clone()));
+                                self.pong = Some(Frame::pong(data.to_vec()));
                             }
-                            Ok(Some(Message::Ping(data)))
+                            Ok(Some(Message::Ping(data.into_vec())))
                         }
-                        OpCtl::Pong => Ok(Some(Message::Pong(frame.into_data()))),
+                        OpCtl::Pong => Ok(Some(Message::Pong(frame.into_data().into_vec()))),
                     }
                 }
 
@@ -499,7 +500,7 @@ impl WebSocketContext {
                     match data {
                         OpData::Continue => {
                             if let Some(ref mut msg) = self.incomplete {
-                                msg.extend(frame.into_data(), self.config.max_message_size)?;
+                                msg.extend(frame.into_data().as_ref(), self.config.max_message_size)?;
                             } else {
                                 return Err(Error::Protocol(
                                     ProtocolError::UnexpectedContinueFrame,
@@ -522,7 +523,7 @@ impl WebSocketContext {
                                     _ => panic!("Bug: message is not text nor binary"),
                                 };
                                 let mut m = IncompleteMessage::new(message_type);
-                                m.extend(frame.into_data(), self.config.max_message_size)?;
+                                m.extend(frame.into_data().as_ref(), self.config.max_message_size)?;
                                 m
                             };
                             if fin {
@@ -701,7 +702,7 @@ mod tests {
         assert_eq!(socket.read_message().unwrap(), Message::Ping(vec![1, 2]));
         assert_eq!(socket.read_message().unwrap(), Message::Pong(vec![3]));
         assert_eq!(socket.read_message().unwrap(), Message::Text("Hello, World!".into()));
-        assert_eq!(socket.read_message().unwrap(), Message::Binary(vec![0x01, 0x02, 0x03]));
+        assert_eq!(socket.read_message().unwrap(), Message::binary(vec![0x01, 0x02, 0x03]));
     }
 
     #[test]
