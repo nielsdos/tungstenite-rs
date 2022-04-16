@@ -5,7 +5,7 @@ Lightweight stream-based WebSocket implementation for [Rust](https://www.rust-la
 ```rust
 use std::net::TcpListener;
 use std::thread::spawn;
-use tungstenite::server::accept;
+use tungstenite::accept;
 
 /// A WebSocket echo server
 fn main () {
@@ -27,6 +27,11 @@ fn main () {
 ```
 
 Take a look at the examples section to see how to write a simple client/server.
+
+**NOTE:** `tungstenite-rs` is more like a barebone to build reliable modern networking applications
+using WebSockets. If you're looking for a modern production-ready "batteries included" WebSocket
+library that allows you to efficiently use non-blocking sockets and do "full-duplex" communication,
+take a look at [`tokio-tungstenite`](https://github.com/snapview/tokio-tungstenite).
 
 [![MIT licensed](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE-MIT)
 [![Apache-2.0 licensed](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE-APACHE)
@@ -54,9 +59,20 @@ Features
 --------
 
 Tungstenite provides a complete implementation of the WebSocket specification.
-TLS is supported on all platforms using native-tls.
+TLS is supported on all platforms using `native-tls` or `rustls`. The following
+features are available:
 
-There is no support for permessage-deflate at the moment. It's planned.
+* `native-tls`
+* `native-tls-vendored`
+* `rustls-tls-native-roots`
+* `rustls-tls-webpki-roots`
+
+Choose the one that is appropriate for your needs.
+
+By default **no TLS feature is activated**, so make sure you use `native-tls` or
+`rustls-tls` feature if you need support of the TLS.
+
+There is no support for permessage-deflate at the moment, but the PRs are welcome :wink:
 
 Testing
 -------
